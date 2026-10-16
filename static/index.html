@@ -1,0 +1,1320 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sim-to-Action 3D VLA Co-Pilot &amp; Kinematics Verifier | Gemini 4 Argon</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #070b14;
+      color: #e2e8f0;
+      overflow-x: hidden;
+    }
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 3px;
+    }
+    .glass-card {
+      background: rgba(15, 23, 42, 0.82);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(51, 65, 85, 0.7);
+    }
+    .pulse-ring {
+      animation: pulseRing 2s infinite;
+    }
+    @keyframes pulseRing {
+      0% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0.45); }
+      70% { box-shadow: 0 0 0 10px rgba(56, 189, 248, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(56, 189, 248, 0); }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- Top Header -->
+  <header class="border-b border-slate-800 bg-slate-950/90 px-6 py-3 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center font-bold text-slate-950 shadow-lg shadow-cyan-500/20">
+        6D
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <h1 class="text-base font-bold tracking-tight text-white">Sim-to-Action 3D VLA Co-Pilot &amp; Kinematics Verifier</h1>
+          <span class="text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+            Track 2: Hard Tech
+          </span>
+        </div>
+        <p class="text-xs text-slate-400">
+          Autonomous 6-DoF Trajectory Synthesis • Antigravity Closed-Loop Collision &amp; IK Self-Repair • WebGPU/Three.js Digital Twin
+        </p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3 text-xs mono">
+      <div class="px-2.5 py-1 rounded bg-slate-900 border border-slate-700 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <span class="text-slate-300">Model:</span>
+        <span id="badge-model" class="text-cyan-300 font-semibold">gemini-4-argon (thinking="high")</span>
+      </div>
+      <div class="px-2.5 py-1 rounded bg-slate-900 border border-slate-700 hidden sm:flex items-center gap-2">
+        <span class="text-slate-400">Sandbox:</span>
+        <span class="text-amber-300">antigravity-preview-09-2026</span>
+      </div>
+      <button id="btn-safety-interlock" onclick="toggleEmergencyStop()" class="px-3 py-1.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-700/70 font-semibold transition">
+        E-STOP INTERLOCK: ARMED
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Content Grid -->
+  <main class="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-4 p-4 max-w-[1800px] w-full mx-auto">
+
+    <!-- Left + Center Column: Command Bar, 3D Viewport, Joint Telemetry (7 cols) -->
+    <section class="lg:col-span-7 flex flex-col gap-4">
+
+      <!-- Command & Scenario Control Card -->
+      <div class="glass-card rounded-xl p-4 flex flex-col gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-semibold uppercase tracking-wider text-cyan-400">VLA Task Prompt &amp; 3D Scene Selector</span>
+            <button
+              onclick="togglePromptStudio()"
+              id="btn-toggle-studio"
+              class="text-[11px] px-2 py-0.5 rounded bg-slate-800/90 hover:bg-slate-700 border border-cyan-500/40 text-cyan-300 mono transition cursor-pointer"
+            >
+              ⚙ Prompt &amp; 6-DoF Studio
+            </button>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="selectScenario('standard_pick_place')" id="scen-standard_pick_place" class="scen-btn text-xs px-2.5 py-1 rounded bg-cyan-600/30 border border-cyan-400 text-cyan-200 font-medium">
+              Scenario A: Tall Cylinder Bypass
+            </button>
+            <button onclick="selectScenario('narrow_corridor')" id="scen-narrow_corridor" class="scen-btn text-xs px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:border-slate-500">
+              Scenario B: Dual-Obstacle Slalom
+            </button>
+            <button onclick="selectScenario('precision_sort')" id="scen-precision_sort" class="scen-btn text-xs px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:border-slate-500">
+              Scenario C: Far-Reach Singularity Guard
+            </button>
+          </div>
+        </div>
+
+        <div class="flex flex-col sm:flex-row gap-2">
+          <input
+            id="input-instruction"
+            type="text"
+             onkeydown="if(event.key==='Enter'){runVerificationLoop();}"
+            placeholder="Enter natural-language prompt (e.g., altitude 55cm, S-curve slalom, 360 scan, reverse from basket, J5 -45 deg, J6 90 deg)..."
+            value="Pick up the red can, avoid the tall central cylinder obstacle via a 52cm overhead arch, and place it into the green goal basket."
+            class="flex-1 bg-slate-900/90 border border-slate-700 rounded-lg px-3.5 py-2 text-sm text-white focus:outline-none focus:border-cyan-400"
+          />
+          <button
+            id="btn-run-loop"
+            onclick="runVerificationLoop()"
+            class="pulse-ring px-5 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-slate-950 font-bold text-sm tracking-wide flex items-center justify-center gap-2 transition shrink-0 cursor-pointer"
+          >
+            <span id="run-btn-icon">▶</span>
+            <span id="run-btn-text">Run Argon + Sandbox Self-Repair</span>
+          </button>
+        </div>
+
+        <!-- Quick Interactive Prompt Preset Chips (5 Distinct Behavioral Modes) -->
+        <div class="flex flex-wrap items-center gap-1.5 text-[11px]">
+          <span class="text-slate-400 font-medium mr-1">Behavior Presets:</span>
+          <button
+            onclick="applyQuickPrompt('Pick up the red can, lift to the front camera zone to perform a 360-degree J5/J6 wrist scan inspection, and return it to its original spot on the right table without entering the basket.')"
+            class="px-2.5 py-1 rounded bg-indigo-950/70 hover:bg-indigo-900 border border-indigo-500/60 hover:border-indigo-400 text-indigo-200 font-medium transition cursor-pointer"
+          >
+            🔍 1. 360° Scan &amp; Return to Origin
+          </button>
+          <button
+            onclick="applyQuickPrompt('Reverse mode: Start at the green basket, retrieve the red can from inside the basket, arch over the central obstacle, and place it onto the right table.')"
+            class="px-2.5 py-1 rounded bg-amber-950/70 hover:bg-amber-900 border border-amber-500/60 hover:border-amber-400 text-amber-200 font-medium transition cursor-pointer"
+          >
+            ⏪ 2. Reverse Fetch (Basket → Table)
+          </button>
+          <button
+            onclick="applyQuickPrompt('S-curve zig-zag slalom mode: Pick up the red can, swing far forward toward the front edge, cut across the center, and sweep far out to the back-left before placing it into the basket.')"
+            class="px-2.5 py-1 rounded bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-500/60 hover:border-emerald-400 text-emerald-200 font-medium transition cursor-pointer"
+          >
+            🐍 3. S-Curve Zig-Zag Slalom
+          </button>
+          <button
+            onclick="applyQuickPrompt('High-altitude air-drop mode: Pick up the red can, ascend to 55cm, hover at 45cm mid-air above the green basket without descending, and release the gripper for a free-fall drop.')"
+            class="px-2.5 py-1 rounded bg-purple-950/70 hover:bg-purple-900 border border-purple-500/60 hover:border-purple-400 text-purple-200 font-medium transition cursor-pointer"
+          >
+            🎯 4. 45cm High-Altitude Air-Drop
+          </button>
+          <button
+            onclick="applyQuickPrompt('Pick up the red can, avoid the tall central cylinder obstacle via a 52cm overhead arch, and place it precisely into the green goal basket.')"
+            class="px-2.5 py-1 rounded bg-slate-900 hover:bg-cyan-950/80 border border-slate-700 hover:border-cyan-400 text-slate-200 transition cursor-pointer"
+          >
+            🚀 5. Standard Overhead Arch (Pick &amp; Place)
+          </button>
+        </div>
+
+        <!-- Live Parsed Prompt Directives Strip -->
+        <div class="flex flex-wrap items-center justify-between gap-2 bg-slate-950/80 border border-slate-800/90 rounded-lg px-3 py-1.5 text-[11px] mono">
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="text-cyan-400 font-semibold">Active Mode: <strong id="dir-mode" class="text-white">🚀 Standard Arch Bypass</strong></span>
+            <span class="text-slate-300">Apex Z: <strong id="dir-z" class="text-emerald-300">0.48m</strong></span>
+            <span class="text-slate-300">Arc Y: <strong id="dir-y" class="text-emerald-300">0.12m</strong></span>
+            <span class="text-slate-300">J5 Roll: <strong id="dir-j5" class="text-amber-300">+38.0°</strong></span>
+            <span class="text-slate-300">J6 Yaw: <strong id="dir-j6" class="text-amber-300">-32.0°</strong></span>
+          </div>
+          <span id="dir-note" class="text-slate-400 truncate max-w-[420px]">Standard Safe Bypass Profile</span>
+        </div>
+
+        <!-- Collapsible Prompt Studio & 6-DoF Parameter Override Drawer -->
+        <div id="prompt-studio-drawer" class="hidden bg-slate-950/95 border border-cyan-500/30 rounded-lg p-3 space-y-3 text-xs">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2">
+            <span class="font-semibold text-cyan-300">⚙ System Prompt &amp; 6-DoF Kinematic Parameter Studio</span>
+            <div class="flex items-center gap-4">
+              <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+                <input type="checkbox" id="chk-manual-override" class="accent-cyan-400" onchange="onManualOverrideToggle()" />
+                <span>Manual Slider Lock</span>
+              </label>
+              <label class="flex items-center gap-1.5 cursor-pointer text-slate-300">
+                <input type="checkbox" id="chk-auto-repair" checked class="accent-emerald-400" />
+                <span>Safety Guardrail Auto-Repair</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div class="bg-slate-900/90 border border-slate-800 rounded p-2">
+              <div class="flex justify-between mono text-[11px] mb-1">
+                <span class="text-slate-400">Bypass Apex Z</span>
+                <span id="lbl-slider-z" class="text-cyan-300 font-bold">0.48 m</span>
+              </div>
+              <input id="slider-z" type="range" min="0.14" max="0.58" step="0.01" value="0.48" oninput="onSliderInput()" class="w-full accent-cyan-400" />
+            </div>
+            <div class="bg-slate-900/90 border border-slate-800 rounded p-2">
+              <div class="flex justify-between mono text-[11px] mb-1">
+                <span class="text-slate-400">Lateral Arc Y</span>
+                <span id="lbl-slider-y" class="text-cyan-300 font-bold">0.12 m</span>
+              </div>
+              <input id="slider-y" type="range" min="0.04" max="0.36" step="0.01" value="0.12" oninput="onSliderInput()" class="w-full accent-cyan-400" />
+            </div>
+            <div class="bg-slate-900/90 border border-slate-800 rounded p-2">
+              <div class="flex justify-between mono text-[11px] mb-1">
+                <span class="text-slate-400">J5 Wrist Roll</span>
+                <span id="lbl-slider-j5" class="text-amber-300 font-bold">+38°</span>
+              </div>
+              <input id="slider-j5" type="range" min="-140" max="140" step="1" value="38" oninput="onSliderInput()" class="w-full accent-amber-400" />
+            </div>
+            <div class="bg-slate-900/90 border border-slate-800 rounded p-2">
+              <div class="flex justify-between mono text-[11px] mb-1">
+                <span class="text-slate-400">J6 Tool Yaw</span>
+                <span id="lbl-slider-j6" class="text-amber-300 font-bold">-32°</span>
+              </div>
+              <input id="slider-j6" type="range" min="-150" max="150" step="1" value="-32" oninput="onSliderInput()" class="w-full accent-amber-400" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-[11px] text-slate-400 mb-1 mono">Custom Gemini System Prompt Role (Optional):</label>
+            <textarea
+              id="input-system-prompt"
+              rows="2"
+              class="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-slate-200 mono focus:outline-none focus:border-cyan-400"
+            >You are Gemini 4 Argon (`thinking_level="high"`), Lead Autonomous Robotics & 3D Kinematics Co-Pilot.</textarea>
+          </div>
+        </div>
+
+        <!-- Trajectory Mode Toggle & Playback Controls -->
+        <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-slate-800/80 text-xs">
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400">Trajectory Preview:</span>
+            <button id="btn-mode-repaired" onclick="switchTrajectoryMode('repaired')" class="px-2.5 py-1 rounded bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 font-semibold">
+              ✓ Verified / Active Trajectory
+            </button>
+            <button id="btn-mode-failed" onclick="switchTrajectoryMode('failed')" class="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-rose-300 hover:border-rose-500/50">
+              ✕ Rejected Collision Path
+            </button>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <button onclick="replayAnimation()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600">
+              ↻ Replay 3D Motion
+            </button>
+            <span id="playback-phase-badge" class="mono px-2.5 py-1 rounded bg-slate-900 border border-slate-700 text-cyan-300">
+              Phase: READY
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3D WebGPU / Three.js Canvas Container -->
+      <div class="glass-card rounded-xl overflow-hidden relative flex-1 min-h-[430px] flex flex-col">
+        <!-- Top Overlay HUD -->
+        <div class="absolute top-3 left-3 right-3 flex items-start justify-between pointer-events-none z-10">
+          <div class="bg-slate-950/85 border border-slate-800 rounded-lg px-3 py-2 text-xs mono space-y-1">
+            <div class="flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-cyan-400"></span>
+              <span class="font-semibold text-white">3D Kinematics Digital Twin (6-DoF Manipulator)</span>
+            </div>
+            <div class="text-slate-400">
+              EE XYZ: <span id="hud-ee-xyz" class="text-emerald-300">[0.000, 0.000, 0.000] m</span>
+              | Gripper: <span id="hud-gripper" class="text-amber-300">OPEN</span>
+            </div>
+            <div class="text-slate-400">
+              Min Obstacle Clearance: <span id="hud-clearance" class="text-cyan-300">-- m</span>
+              (Safety Margin: <span id="hud-margin" class="text-slate-300">0.035 m</span>)
+            </div>
+          </div>
+
+          <!-- Legend -->
+          <div class="bg-slate-950/85 border border-slate-800 rounded-lg px-3 py-2 text-[11px] space-y-1 hidden sm:block">
+            <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-sm bg-rose-500 inline-block"></span> Target Can (Pick)</div>
+            <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-sm bg-amber-500 inline-block"></span> Tall Obstacle Cylinder</div>
+            <div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block"></span> Goal Basket (Place)</div>
+            <div class="flex items-center gap-2"><span class="w-2.5 h-0.5 bg-emerald-400 inline-block"></span> Verified Safe Trajectory</div>
+            <div class="flex items-center gap-2"><span class="w-2.5 h-0.5 bg-rose-500 inline-block"></span> Iter-1 Failed Path</div>
+          </div>
+        </div>
+
+        <div id="canvas-container" class="w-full flex-1 min-h-[430px] cursor-grab active:cursor-grabbing"></div>
+
+        <!-- Bottom Waypoint Scrubber Bar -->
+        <div class="bg-slate-950/95 border-t border-slate-800 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div class="flex items-center gap-1.5 flex-wrap" id="waypoint-pills">
+            <!-- Populated dynamically -->
+          </div>
+          <div class="mono text-slate-400 text-[11px]">
+            Drag to Orbit • Scroll to Zoom • Click Waypoint to Inspect
+          </div>
+        </div>
+      </div>
+
+      <!-- 6-DoF Joint Telemetry & Limit Bars -->
+      <div class="glass-card rounded-xl p-4">
+        <div class="flex items-center justify-between mb-2.5">
+          <span class="text-xs font-semibold uppercase tracking-wider text-cyan-400">
+            Real-Time 6-DoF Joint Angles &amp; Hardware Limit Telemetry
+          </span>
+          <span class="text-[11px] mono text-slate-400">Constraint: θᵢ ∈ [θ_min, θ_max]</span>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5" id="joint-cards">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+    </section>
+
+    <!-- Right Column: Antigravity Closed-Loop Verification Trail & JSON Inspector (5 cols) -->
+    <section class="lg:col-span-5 flex flex-col gap-4">
+
+      <!-- KPI Summary Strip -->
+      <div class="grid grid-cols-3 gap-3">
+        <div class="glass-card rounded-xl p-3 border-l-4 border-l-emerald-400">
+          <div class="text-[11px] text-slate-400 uppercase font-semibold">Verification Status</div>
+          <div id="kpi-status" class="text-lg font-bold text-emerald-400 mono mt-0.5">PASSED (Iter 2)</div>
+          <div class="text-[11px] text-slate-400">Self-Repaired in 1 Loop</div>
+        </div>
+        <div class="glass-card rounded-xl p-3 border-l-4 border-l-cyan-400">
+          <div class="text-[11px] text-slate-400 uppercase font-semibold">Min 3D Clearance</div>
+          <div id="kpi-clearance" class="text-lg font-bold text-cyan-300 mono mt-0.5">+0.082 m</div>
+          <div id="kpi-margin-sub" class="text-[11px] text-slate-400">Req &ge; 0.035 m</div>
+        </div>
+        <div class="glass-card rounded-xl p-3 border-l-4 border-l-amber-400">
+          <div class="text-[11px] text-slate-400 uppercase font-semibold">Violations Fixed</div>
+          <div id="kpi-violations" class="text-lg font-bold text-amber-300 mono mt-0.5">2 &rarr; 0</div>
+          <div class="text-[11px] text-slate-400">Joint Limit + Collision</div>
+        </div>
+      </div>
+
+      <!-- Iteration Trail Log Panel -->
+      <div class="glass-card rounded-xl p-4 flex-1 flex flex-col min-h-[420px]">
+        <div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-800">
+          <div>
+            <h2 class="text-sm font-bold text-white flex items-center gap-2">
+              <span>Antigravity Sandbox Verification &amp; Self-Repair Trail</span>
+            </h2>
+            <p class="text-xs text-slate-400">
+              Closed-loop execution logs from <code class="text-cyan-300">kinematics_verifier.py</code> &amp; Gemini 4 Argon
+            </p>
+          </div>
+          <span id="loop-latency" class="mono text-xs px-2 py-1 rounded bg-slate-900 border border-slate-700 text-slate-300">
+            -- ms
+          </span>
+        </div>
+
+        <div id="iterations-container" class="space-y-3 overflow-y-auto max-h-[460px] pr-1">
+          <!-- Populated dynamically with Iteration 1 (FAIL) and Iteration 2 (PASS) cards -->
+        </div>
+      </div>
+
+      <!-- Exportable Verified Waypoints JSON / ROS 2 Action Payload -->
+      <div class="glass-card rounded-xl p-4">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs font-semibold uppercase tracking-wider text-cyan-400">
+            Verified Trajectory Output (Sim-to-Action / ROS 2 JointTrajectory JSON)
+          </span>
+          <button onclick="copyTrajectoryJson()" id="btn-copy-json" class="text-xs px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 mono">
+            Copy JSON
+          </button>
+        </div>
+        <pre id="json-output" class="mono text-[11px] bg-slate-950/90 border border-slate-800 rounded-lg p-3 text-emerald-300 overflow-x-auto max-h-44"></pre>
+      </div>
+
+    </section>
+  </main>
+
+  <script>
+    // =========================================================================
+    // Global State
+    // =========================================================================
+    let currentScenarioId = "standard_pick_place";
+    let lastPlanResult = null;
+    let activeTrajectoryMode = "repaired"; // 'repaired' | 'failed'
+    let activeWaypoints = [];
+    let emergencyStop = false;
+
+    // Animation state
+    let animPlaying = true;
+    let animProgress = 0; // 0 .. (activeWaypoints.length - 1)
+    let animSpeed = 0.012;
+    let payloadState = "table"; // 'table' | 'attached' | 'basket'
+
+    // Three.js objects
+    let scene3d, camera, renderer, controls;
+    let robotJointGroups = [];
+    let gripperLeft, gripperRight;
+    let canMesh, obstacleMesh, secondaryObstacleMesh, basketGroup;
+    let safePathLine, failedPathLine, collisionMarkerMesh;
+
+    const JOINT_NAMES = [
+      "J1 Base Yaw",
+      "J2 Shoulder",
+      "J3 Elbow",
+      "J4 Wrist Pitch",
+      "J5 Wrist Roll",
+      "J6 Tool Yaw"
+    ];
+    const JOINT_LIMITS = [
+      [-170, 170],
+      [-120, 120],
+      [-150, 150],
+      [-170, 170],
+      [-170, 170],
+      [-170, 170]
+    ];
+
+    // =========================================================================
+    // Initialize Joint Telemetry Cards
+    // =========================================================================
+    function initJointCards() {
+      const container = document.getElementById("joint-cards");
+      container.innerHTML = JOINT_NAMES.map((name, idx) => {
+        const [minL, maxL] = JOINT_LIMITS[idx];
+        return `
+          <div id="jcard-${idx}" class="bg-slate-900/90 border border-slate-800 rounded-lg p-2.5 flex flex-col justify-between">
+            <div class="flex items-center justify-between text-[11px]">
+              <span class="text-slate-400 font-medium">${name}</span>
+              <span id="jstatus-${idx}" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            </div>
+            <div id="jval-${idx}" class="text-base font-bold mono text-white my-1">0.0°</div>
+            <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+              <div id="jbar-${idx}" class="bg-cyan-400 h-full transition-all duration-75" style="width: 50%"></div>
+            </div>
+            <div class="flex justify-between text-[10px] mono text-slate-500 mt-1">
+              <span>${minL}°</span>
+              <span>${maxL}°</span>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    function updateJointTelemetryUI(jointsDeg) {
+      jointsDeg.forEach((deg, idx) => {
+        const [minL, maxL] = JOINT_LIMITS[idx];
+        const valEl = document.getElementById(`jval-${idx}`);
+        const barEl = document.getElementById(`jbar-${idx}`);
+        const cardEl = document.getElementById(`jcard-${idx}`);
+        const statusEl = document.getElementById(`jstatus-${idx}`);
+        if (!valEl) return;
+
+        valEl.textContent = `${deg.toFixed(1)}°`;
+        const pct = Math.max(0, Math.min(100, ((deg - minL) / (maxL - minL)) * 100));
+        barEl.style.width = `${pct}%`;
+
+        const violated = deg < minL || deg > maxL;
+        if (violated) {
+          cardEl.className = "bg-rose-950/60 border border-rose-500 rounded-lg p-2.5 flex flex-col justify-between";
+          barEl.className = "bg-rose-500 h-full";
+          statusEl.className = "w-2 h-2 rounded-full bg-rose-500 animate-ping";
+        } else {
+          cardEl.className = "bg-slate-900/90 border border-slate-800 rounded-lg p-2.5 flex flex-col justify-between";
+          barEl.className = "bg-cyan-400 h-full";
+          statusEl.className = "w-2 h-2 rounded-full bg-emerald-400";
+        }
+      });
+    }
+
+    // =========================================================================
+    // Coordinate Helper: Robotics Z-up [x, y, z] -> Three.js Y-up [x, z, -y]
+    // =========================================================================
+    function roboToThree(xyz) {
+      return new THREE.Vector3(xyz[0], xyz[2], -xyz[1]);
+    }
+
+    // =========================================================================
+    // Initialize Three.js 3D Digital Twin
+    // =========================================================================
+    function initThreeJS() {
+      const container = document.getElementById("canvas-container");
+      const width = container.clientWidth || 800;
+      const height = container.clientHeight || 440;
+
+      scene3d = new THREE.Scene();
+      scene3d.background = new THREE.Color(0x070b14);
+      scene3d.fog = new THREE.FogExp2(0x070b14, 0.45);
+
+      camera = new THREE.PerspectiveCamera(42, width / height, 0.05, 20);
+      camera.position.set(0.78, 0.68, 0.82);
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      container.innerHTML = "";
+      container.appendChild(renderer.domElement);
+
+      controls = new THREE.OrbitControls(camera, renderer.domElement);
+      controls.target.set(0.05, 0.18, -0.15);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+
+      // Lights
+      const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x0f172a, 0.9);
+      scene3d.add(hemiLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+      dirLight.position.set(1.2, 1.8, 1.0);
+      dirLight.castShadow = true;
+      scene3d.add(dirLight);
+
+      const pointLight = new THREE.PointLight(0x38bdf8, 0.7, 3.0);
+      pointLight.position.set(-0.5, 0.8, 0.5);
+      scene3d.add(pointLight);
+
+      // Workcell Table & Grid
+      const tableGeo = new THREE.BoxGeometry(1.25, 0.04, 1.25);
+      const tableMat = new THREE.MeshStandardMaterial({
+        color: 0x0f172a,
+        roughness: 0.7,
+        metalness: 0.2
+      });
+      const tableMesh = new THREE.Mesh(tableGeo, tableMat);
+      tableMesh.position.set(0, -0.02, 0);
+      tableMesh.receiveShadow = true;
+      scene3d.add(tableMesh);
+
+      const grid = new THREE.GridHelper(1.25, 25, 0x1e293b, 0x1e293b);
+      grid.position.y = 0.001;
+      scene3d.add(grid);
+
+      // Build 6-DoF Articulated Robot Arm Visual Links (updated via FK joint_positions)
+      buildRobotVisuals();
+
+      // Build Scene Objects (Target Can, Obstacles, Goal Basket)
+      buildSceneObjects();
+
+      window.addEventListener("resize", () => {
+        if (!container) return;
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      });
+
+      animateLoop();
+    }
+
+    let jointSpheres = [];
+    let linkCylinders = [];
+    let wristRollDrum;
+    let eeGroup, toolYawFlange, gripperSubGroup;
+
+    function buildRobotVisuals() {
+      // Pedestal base
+      const baseGeo = new THREE.CylinderGeometry(0.065, 0.08, 0.03, 24);
+      const baseMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.6, roughness: 0.3 });
+      const baseMesh = new THREE.Mesh(baseGeo, baseMat);
+      baseMesh.position.set(0, 0.015, 0);
+      scene3d.add(baseMesh);
+
+      const sphereMat = new THREE.MeshStandardMaterial({ color: 0x38bdf8, metalness: 0.5, roughness: 0.25 });
+      const linkColors = [0x475569, 0x0284c7, 0x0ea5e9, 0x38bdf8, 0xe2e8f0];
+
+      for (let i = 0; i < 6; i++) {
+        const radius = i === 0 ? 0.042 : i === 5 ? 0.018 : 0.034 - i * 0.003;
+        const sp = new THREE.Mesh(new THREE.SphereGeometry(radius, 20, 20), sphereMat);
+        sp.castShadow = true;
+        scene3d.add(sp);
+        jointSpheres.push(sp);
+      }
+
+      for (let i = 0; i < 5; i++) {
+        const r = 0.026 - i * 0.003;
+        const cylGeo = new THREE.CylinderGeometry(r, r, 1.0, 16);
+        const cylMat = new THREE.MeshStandardMaterial({
+          color: linkColors[i],
+          metalness: 0.45,
+          roughness: 0.35
+        });
+        const cyl = new THREE.Mesh(cylGeo, cylMat);
+        cyl.castShadow = true;
+        scene3d.add(cyl);
+        linkCylinders.push(cyl);
+      }
+
+      // Wrist Roll (J5) servo drum visual at Joint 4
+      wristRollDrum = new THREE.Group();
+      const drumMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.026, 0.026, 0.046, 20),
+        new THREE.MeshStandardMaterial({ color: 0x0ea5e9, metalness: 0.6, roughness: 0.25 })
+      );
+      drumMesh.rotation.z = Math.PI / 2;
+      const drumStripe = new THREE.Mesh(
+        new THREE.BoxGeometry(0.05, 0.01, 0.03),
+        new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+      );
+      wristRollDrum.add(drumMesh);
+      wristRollDrum.add(drumStripe);
+      scene3d.add(wristRollDrum);
+
+      // End-Effector Assembly (J5 Wrist Roll + J6 Tool Yaw + Parallel Jaw Servo Gripper)
+      eeGroup = new THREE.Group();
+
+      // Tool Yaw (J6) rotating flange with high-contrast index markers
+      toolYawFlange = new THREE.Group();
+      const flangeCyl = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.028, 0.030, 0.014, 24),
+        new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.7, roughness: 0.2 })
+      );
+      flangeCyl.position.y = 0.016;
+      const flangeMarker1 = new THREE.Mesh(
+        new THREE.BoxGeometry(0.062, 0.008, 0.008),
+        new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+      );
+      flangeMarker1.position.y = 0.016;
+      const flangeMarker2 = new THREE.Mesh(
+        new THREE.BoxGeometry(0.008, 0.008, 0.062),
+        new THREE.MeshBasicMaterial({ color: 0xf59e0b })
+      );
+      flangeMarker2.position.y = 0.016;
+      toolYawFlange.add(flangeCyl);
+      toolYawFlange.add(flangeMarker1);
+      toolYawFlange.add(flangeMarker2);
+
+      // Parallel Jaw Gripper Body & Contoured Fingers
+      gripperSubGroup = new THREE.Group();
+      const palmMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(0.11, 0.016, 0.034),
+        new THREE.MeshStandardMaterial({ color: 0x64748b, metalness: 0.65, roughness: 0.3 })
+      );
+      palmMesh.position.y = 0.004;
+      gripperSubGroup.add(palmMesh);
+
+      // Left & Right Finger Assemblies (outer strut + inner dark high-friction grip pad)
+      const buildFinger = (isLeft) => {
+        const fg = new THREE.Group();
+        const sign = isLeft ? -1 : 1;
+        const strut = new THREE.Mesh(
+          new THREE.BoxGeometry(0.009, 0.056, 0.022),
+          new THREE.MeshStandardMaterial({ color: 0xf1f5f9, metalness: 0.4, roughness: 0.3 })
+        );
+        strut.position.set(sign * 0.005, -0.026, 0);
+
+        const pad = new THREE.Mesh(
+          new THREE.BoxGeometry(0.004, 0.044, 0.024),
+          new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.9 })
+        );
+        pad.position.set(0, -0.028, 0);
+
+        const tipBevel = new THREE.Mesh(
+          new THREE.BoxGeometry(0.011, 0.010, 0.022),
+          new THREE.MeshStandardMaterial({ color: 0x38bdf8 })
+        );
+        tipBevel.position.set(sign * 0.004, -0.052, 0);
+
+        fg.add(strut);
+        fg.add(pad);
+        fg.add(tipBevel);
+        return fg;
+      };
+
+      gripperLeft = buildFinger(true);
+      gripperRight = buildFinger(false);
+      gripperLeft.position.set(-0.048, 0, 0);
+      gripperRight.position.set(0.048, 0, 0);
+      gripperSubGroup.add(gripperLeft);
+      gripperSubGroup.add(gripperRight);
+
+      toolYawFlange.add(gripperSubGroup);
+      eeGroup.add(toolYawFlange);
+      scene3d.add(eeGroup);
+    }
+
+    function buildSceneObjects() {
+      // Target Red Can (with metallic top rim so rotation is clearly visible)
+      canMesh = new THREE.Group();
+      const canBody = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.032, 0.032, 0.106, 28),
+        new THREE.MeshStandardMaterial({ color: 0xf43f5e, metalness: 0.35, roughness: 0.3 })
+      );
+      canBody.castShadow = true;
+      const canRim = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.0325, 0.0325, 0.006, 28),
+        new THREE.MeshStandardMaterial({ color: 0xe2e8f0, metalness: 0.8, roughness: 0.2 })
+      );
+      canRim.position.y = 0.052;
+      const canLabel = new THREE.Mesh(
+        new THREE.BoxGeometry(0.066, 0.028, 0.012),
+        new THREE.MeshStandardMaterial({ color: 0xffffff })
+      );
+      canMesh.add(canBody);
+      canMesh.add(canRim);
+      canMesh.add(canLabel);
+      scene3d.add(canMesh);
+
+      // Primary Tall Obstacle Cylinder + translucent safety shell
+      obstacleMesh = new THREE.Group();
+      const obsCore = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.055, 0.055, 0.28, 28),
+        new THREE.MeshStandardMaterial({ color: 0xf59e0b, roughness: 0.35, metalness: 0.2 })
+      );
+      const obsShell = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.09, 0.09, 0.29, 28),
+        new THREE.MeshBasicMaterial({ color: 0xf59e0b, wireframe: true, transparent: true, opacity: 0.25 })
+      );
+      obstacleMesh.add(obsCore);
+      obstacleMesh.add(obsShell);
+      scene3d.add(obstacleMesh);
+
+      // Secondary Obstacle Cylinder
+      secondaryObstacleMesh = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.045, 0.045, 0.22, 24),
+        new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.4, metalness: 0.2 })
+      );
+      scene3d.add(secondaryObstacleMesh);
+
+      // Goal Basket (Green rimmed container)
+      basketGroup = new THREE.Group();
+      const basketBase = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.09, 0.075, 0.09, 28, 1, true),
+        new THREE.MeshStandardMaterial({
+          color: 0x10b981,
+          side: THREE.DoubleSide,
+          roughness: 0.4,
+          metalness: 0.2
+        })
+      );
+      const basketBottom = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.075, 0.075, 0.01, 28),
+        new THREE.MeshStandardMaterial({ color: 0x065f46 })
+      );
+      basketBottom.position.y = -0.04;
+      basketGroup.add(basketBase);
+      basketGroup.add(basketBottom);
+      scene3d.add(basketGroup);
+
+      // Collision Flash Marker (shown when viewing Iteration 1 Failed Trajectory)
+      collisionMarkerMesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.048, 20, 20),
+        new THREE.MeshBasicMaterial({ color: 0xef4444, wireframe: true })
+      );
+      collisionMarkerMesh.visible = false;
+      scene3d.add(collisionMarkerMesh);
+    }
+
+    function updateSceneGeometryFromSpec(sceneSpec) {
+      if (!sceneSpec) return;
+      const canPos = sceneSpec.target_can.pos;
+      canMesh.position.copy(roboToThree([canPos[0], canPos[1], canPos[2]]));
+      canMesh.rotation.set(0, 0, 0);
+
+      const obs = sceneSpec.obstacle_cylinder;
+      obstacleMesh.position.copy(roboToThree([obs.pos[0], obs.pos[1], obs.height / 2]));
+
+      if (sceneSpec.secondary_obstacle) {
+        const sec = sceneSpec.secondary_obstacle;
+        secondaryObstacleMesh.visible = true;
+        secondaryObstacleMesh.position.copy(roboToThree([sec.pos[0], sec.pos[1], sec.height / 2]));
+      } else {
+        secondaryObstacleMesh.visible = false;
+      }
+
+      const bsk = sceneSpec.goal_basket;
+      basketGroup.position.copy(roboToThree([bsk.pos[0], bsk.pos[1], bsk.height / 2]));
+    }
+
+    // =========================================================================
+    // Forward Kinematics in JS (matches kinematics_verifier.py 100%)
+    // =========================================================================
+    const L_BASE = 0.12, L_UPPER = 0.28, L_FORE = 0.24, L_WRIST = 0.10, L_TOOL = 0.08;
+
+    function matMul(A, B) {
+      const C = [
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 0, 0, 0]
+      ];
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+          C[i][j] = A[i][0]*B[0][j] + A[i][1]*B[1][j] + A[i][2]*B[2][j] + A[i][3]*B[3][j];
+        }
+      }
+      return C;
+    }
+    function rotZ(t) {
+      const c = Math.cos(t), s = Math.sin(t);
+      return [[c,-s,0,0],[s,c,0,0],[0,0,1,0],[0,0,0,1]];
+    }
+    function rotY(t) {
+      const c = Math.cos(t), s = Math.sin(t);
+      return [[c,0,s,0],[0,1,0,0],[-s,0,c,0],[0,0,0,1]];
+    }
+    function rotX(t) {
+      const c = Math.cos(t), s = Math.sin(t);
+      return [[1,0,0,0],[0,c,-s,0],[0,s,c,0],[0,0,0,1]];
+    }
+    function trans(x, y, z) {
+      return [[1,0,0,x],[0,1,0,y],[0,0,1,z],[0,0,0,1]];
+    }
+
+    function computeFKJS(jointsDeg) {
+      const q = jointsDeg.map(d => (d * Math.PI) / 180.0);
+      const p0 = [0, 0, 0];
+      const T1 = matMul(trans(0, 0, L_BASE), rotZ(q[0]));
+      const p1 = [T1[0][3], T1[1][3], T1[2][3]];
+      const T2 = matMul(matMul(T1, rotY(q[1])), trans(0, 0, L_UPPER));
+      const p2 = [T2[0][3], T2[1][3], T2[2][3]];
+      const T3 = matMul(matMul(T2, rotY(q[2])), trans(0, 0, L_FORE));
+      const p3 = [T3[0][3], T3[1][3], T3[2][3]];
+      const T4 = matMul(matMul(T3, rotY(q[3])), trans(0, 0, L_WRIST));
+      const p4 = [T4[0][3], T4[1][3], T4[2][3]];
+      const T5 = matMul(matMul(matMul(T4, rotX(q[4])), rotZ(q[5])), trans(0, 0, L_TOOL));
+      const p5 = [T5[0][3], T5[1][3], T5[2][3]];
+      return [p0, p1, p2, p3, p4, p5];
+    }
+
+    function updateRobotMeshFromJoints(jointsDeg, gripperOpening, payloadAttached, phaseName, hasPlacedInBasket) {
+      const pts = computeFKJS(jointsDeg);
+      const threePts = pts.map(p => roboToThree(p));
+
+      for (let i = 0; i < 6; i++) {
+        jointSpheres[i].position.copy(threePts[i]);
+      }
+
+      const upVec = new THREE.Vector3(0, 1, 0);
+      for (let i = 0; i < 5; i++) {
+        const start = threePts[i];
+        const end = threePts[i + 1];
+        const mid = new THREE.Vector3().addVectors(start, end).multiplyScalar(0.5);
+        const dir = new THREE.Vector3().subVectors(end, start);
+        const len = dir.length();
+
+        const cyl = linkCylinders[i];
+        cyl.position.copy(mid);
+        cyl.scale.set(1, Math.max(len, 0.001), 1);
+        cyl.quaternion.setFromUnitVectors(upVec, dir.normalize());
+      }
+
+      // Position & Orient Wrist Roll (J5) Drum at Joint 4
+      const p4 = threePts[4];
+      const p5 = threePts[5];
+      wristRollDrum.position.copy(p4);
+      const j1Rad = (jointsDeg[0] * Math.PI) / 180.0;
+      const j5Rad = (jointsDeg[4] * Math.PI) / 180.0;
+      const j6Rad = (jointsDeg[5] * Math.PI) / 180.0;
+      wristRollDrum.rotation.set(j5Rad, j1Rad, 0, "YXZ");
+
+      // Position & Orient End-Effector Gripper (J5 Wrist Roll + J6 Tool Yaw)
+      eeGroup.position.copy(p5);
+      // Align eeGroup's -Y axis with the tool vector (p4 -> p5), then apply J5 roll and J6 yaw
+      const toolDir = new THREE.Vector3().subVectors(p5, p4).normalize();
+      const downVec = new THREE.Vector3(0, -1, 0);
+      const alignQuat = new THREE.Quaternion().setFromUnitVectors(downVec, toolDir);
+      eeGroup.quaternion.copy(alignQuat);
+
+      // Apply J5 Wrist Roll banking and J6 Tool Yaw rotation visibly on the tool flange
+      toolYawFlange.rotation.set(j5Rad * 0.65, j1Rad + j6Rad, 0, "YXZ");
+
+      // Smoothly interpolate parallel finger jaws:
+      // gripperOpening = 1.0 (Open: ±0.050m clears r=0.032m can)
+      // gripperOpening = 0.0 (Clamped: ±0.0315m hugs the r=0.032m can body)
+      const openRatio = Math.max(0.0, Math.min(1.0, gripperOpening));
+      const fingerOffset = 0.0315 + openRatio * 0.0185;
+      gripperLeft.position.x = -fingerOffset;
+      gripperRight.position.x = fingerOffset;
+
+      // Update Target Can position & orientation seamlessly across all 5 behavioral modes
+      const rawEE = pts[5];
+      if (lastPlanResult && lastPlanResult.scene) {
+        const initCan = lastPlanResult.scene.target_can.pos;
+        const bsk = lastPlanResult.scene.goal_basket.pos;
+        const bskRest = [bsk[0], bsk[1], bsk[2] + 0.013];
+        const behaviorMode =
+          (activeTrajectoryMode === "repaired" && lastPlanResult.applied_prompt_params?.behavior_mode)
+            ? lastPlanResult.applied_prompt_params.behavior_mode
+            : "standard_arch";
+
+        const startPos = behaviorMode === "reverse_fetch" ? bskRest : initCan;
+        const endPos = (behaviorMode === "reverse_fetch" || behaviorMode === "inspect_return") ? initCan : bskRest;
+
+        if (payloadAttached) {
+          // Can is held firmly between the left and right gripper pads:
+          const heldPos = new THREE.Vector3().copy(p5).addScaledVector(toolDir, 0.032);
+          canMesh.position.copy(heldPos);
+          canMesh.rotation.set(j5Rad * 0.35, j1Rad + j6Rad, 0, "YXZ");
+        } else if (hasPlacedInBasket) {
+          if (behaviorMode === "air_drop" && phaseName === "place") {
+            // Animate gravity free-fall from high-altitude release point into the basket
+            const dropProgress = Math.min(1.0, Math.max(0.0, (animProgress % 1) * 1.8));
+            const dropZ = (rawEE[2] - 0.03) * (1 - dropProgress * dropProgress) + endPos[2] * (dropProgress * dropProgress);
+            canMesh.position.copy(roboToThree([endPos[0], endPos[1], Math.max(endPos[2], dropZ)]));
+          } else {
+            canMesh.position.copy(roboToThree(endPos));
+          }
+          canMesh.rotation.set(0, j1Rad + j6Rad, 0);
+        } else {
+          // Sitting at initial coordinates waiting for grasp
+          canMesh.position.copy(roboToThree(startPos));
+          canMesh.rotation.set(0, 0, 0);
+        }
+      }
+
+      // Update HUD
+      const gripLabel = openRatio < 0.25 ? "CLAMPED (0%)" : openRatio > 0.85 ? "OPEN (100%)" : `CLOSING (${Math.round((1 - openRatio) * 100)}%)`;
+      document.getElementById("hud-ee-xyz").textContent =
+        `[${rawEE[0].toFixed(3)}, ${rawEE[1].toFixed(3)}, ${rawEE[2].toFixed(3)}] m`;
+      document.getElementById("hud-gripper").textContent = gripLabel;
+      document.getElementById("playback-phase-badge").textContent = `Phase: ${(phaseName || "TRANSIT").toUpperCase()}`;
+
+      updateJointTelemetryUI(jointsDeg);
+    }
+
+    function buildTrajectoryCurveLines(safeWps, failedWps) {
+      if (safePathLine) scene3d.remove(safePathLine);
+      if (failedPathLine) scene3d.remove(failedPathLine);
+
+      if (safeWps && safeWps.length > 1) {
+        const pts = [];
+        for (let i = 0; i < safeWps.length - 1; i++) {
+          const qA = safeWps[i].joints_deg;
+          const qB = safeWps[i + 1].joints_deg;
+          for (let s = 0; s <= 12; s++) {
+            const t = s / 12;
+            const q = qA.map((v, idx) => v * (1 - t) + qB[idx] * t);
+            const fk = computeFKJS(q);
+            pts.push(roboToThree(fk[5]));
+          }
+        }
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({ color: 0x10b981, linewidth: 3 });
+        safePathLine = new THREE.Line(geo, mat);
+        scene3d.add(safePathLine);
+      }
+
+      if (failedWps && failedWps.length > 1) {
+        const pts = [];
+        for (let i = 0; i < failedWps.length - 1; i++) {
+          const qA = failedWps[i].joints_deg;
+          const qB = failedWps[i + 1].joints_deg;
+          for (let s = 0; s <= 10; s++) {
+            const t = s / 10;
+            const q = qA.map((v, idx) => v * (1 - t) + qB[idx] * t);
+            const fk = computeFKJS(q);
+            pts.push(roboToThree(fk[5]));
+          }
+        }
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineDashedMaterial({ color: 0xf43f5e, dashSize: 0.03, gapSize: 0.015 });
+        failedPathLine = new THREE.Line(geo, mat);
+        failedPathLine.computeLineDistances();
+        scene3d.add(failedPathLine);
+      }
+    }
+
+    // =========================================================================
+    // Animation Loop
+    // =========================================================================
+    function animateLoop() {
+      requestAnimationFrame(animateLoop);
+
+      if (animPlaying && !emergencyStop && activeWaypoints.length >= 2) {
+        animProgress += animSpeed;
+        const maxIdx = activeWaypoints.length - 1;
+        if (animProgress >= maxIdx) {
+          animProgress = 0;
+        }
+        const segIdx = Math.floor(animProgress);
+        const alpha = animProgress - segIdx;
+        const wpA = activeWaypoints[segIdx];
+        const wpB = activeWaypoints[Math.min(segIdx + 1, maxIdx)];
+
+        // Smoothstep interpolation for both joints and gripper finger opening
+        const smooth = alpha * alpha * (3 - 2 * alpha);
+        const interpJoints = wpA.joints_deg.map(
+          (val, i) => val * (1 - smooth) + wpB.joints_deg[i] * smooth
+        );
+
+        const openA = wpA.gripper_opening !== undefined ? wpA.gripper_opening : (wpA.gripper === "closed" ? 0.0 : 1.0);
+        const openB = wpB.gripper_opening !== undefined ? wpB.gripper_opening : (wpB.gripper === "closed" ? 0.0 : 1.0);
+        const interpOpening = openA * (1 - smooth) + openB * smooth;
+
+        // Payload is attached once the gripper has clamped around the can (interpOpening <= 0.35)
+        // and stays attached until the gripper opens inside the basket!
+        const attachedA = Boolean(wpA.payload_attached);
+        const attachedB = Boolean(wpB.payload_attached);
+        let payloadAttached = false;
+        if (attachedA && attachedB) {
+          payloadAttached = true;
+        } else if (!attachedA && attachedB) {
+          // Clamping onto can at pick pose: attach as soon as fingers close past 65%
+          payloadAttached = smooth >= 0.65;
+        } else if (attachedA && !attachedB) {
+          // Releasing can inside basket: detach as soon as fingers start opening past 35%
+          payloadAttached = smooth < 0.35;
+        }
+
+        const phase = alpha < 0.5 ? wpA.phase : wpB.phase;
+        const hasPlacedInBasket =
+          wpA.phase === "place" ||
+          wpA.phase === "retract" ||
+          (wpA.phase === "lower_place" && wpB.phase === "place" && smooth >= 0.35);
+
+        updateRobotMeshFromJoints(interpJoints, interpOpening, payloadAttached, phase, hasPlacedInBasket);
+        highlightActiveWaypointPill(segIdx);
+      }
+
+      if (controls) controls.update();
+      if (renderer && scene3d && camera) renderer.render(scene3d, camera);
+    }
+
+    // =========================================================================
+    // UI Interactions & Backend API Integration
+    // =========================================================================
+    function renderWaypointPills() {
+      const container = document.getElementById("waypoint-pills");
+      container.innerHTML = activeWaypoints.map((wp, idx) => `
+        <button
+          id="wp-pill-${idx}"
+          onclick="jumpToWaypoint(${idx})"
+          class="px-2 py-0.5 rounded text-[11px] mono border border-slate-700 bg-slate-900 text-slate-300 hover:border-cyan-400 transition"
+        >
+          ${idx}: ${wp.name}
+        </button>
+      `).join("");
+    }
+
+    function highlightActiveWaypointPill(activeIdx) {
+      activeWaypoints.forEach((_, idx) => {
+        const el = document.getElementById(`wp-pill-${idx}`);
+        if (!el) return;
+        if (idx === activeIdx) {
+          el.className = "px-2 py-0.5 rounded text-[11px] mono border border-cyan-400 bg-cyan-500/20 text-cyan-200 font-semibold";
+        } else {
+          el.className = "px-2 py-0.5 rounded text-[11px] mono border border-slate-700 bg-slate-900 text-slate-400 hover:border-cyan-400";
+        }
+      });
+    }
+
+    function jumpToWaypoint(idx) {
+      if (!activeWaypoints[idx]) return;
+      animPlaying = false;
+      animProgress = idx;
+      const wp = activeWaypoints[idx];
+      const opening = wp.gripper_opening !== undefined ? wp.gripper_opening : (wp.gripper === "closed" ? 0.0 : 1.0);
+      const placed = wp.phase === "place" || wp.phase === "retract";
+      updateRobotMeshFromJoints(wp.joints_deg, opening, Boolean(wp.payload_attached), wp.phase, placed);
+      highlightActiveWaypointPill(idx);
+    }
+
+    function replayAnimation() {
+      animProgress = 0;
+      animPlaying = true;
+    }
+
+    function toggleEmergencyStop() {
+      emergencyStop = !emergencyStop;
+      const btn = document.getElementById("btn-safety-interlock");
+      if (emergencyStop) {
+        btn.textContent = "E-STOP INTERLOCK: HALTED (CLICK TO RESUME)";
+        btn.className = "px-3 py-1.5 rounded bg-rose-600 text-white font-bold border border-rose-400 animate-pulse";
+      } else {
+        btn.textContent = "E-STOP INTERLOCK: ARMED";
+        btn.className = "px-3 py-1.5 rounded bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-700/70 font-semibold transition";
+      }
+    }
+
+    function switchTrajectoryMode(mode) {
+      activeTrajectoryMode = mode;
+      const btnRepaired = document.getElementById("btn-mode-repaired");
+      const btnFailed = document.getElementById("btn-mode-failed");
+
+      if (!lastPlanResult) return;
+
+      if (mode === "repaired") {
+        activeWaypoints = lastPlanResult.final_trajectory || [];
+        collisionMarkerMesh.visible = false;
+        btnRepaired.className = "px-2.5 py-1 rounded bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 font-semibold";
+        btnFailed.className = "px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-rose-300 hover:border-rose-500/50";
+      } else {
+        activeWaypoints = lastPlanResult.failed_trajectory_preview || [];
+        const obsPos = lastPlanResult.scene.obstacle_cylinder.pos;
+        collisionMarkerMesh.position.copy(roboToThree([obsPos[0], obsPos[1], 0.14]));
+        collisionMarkerMesh.visible = true;
+        btnFailed.className = "px-2.5 py-1 rounded bg-rose-500/25 border border-rose-500 text-rose-200 font-semibold";
+        btnRepaired.className = "px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-emerald-300 hover:border-emerald-500/50";
+      }
+      renderWaypointPills();
+      replayAnimation();
+    }
+
+    async function selectScenario(scenId) {
+      currentScenarioId = scenId;
+      document.querySelectorAll(".scen-btn").forEach(btn => {
+        btn.className = "scen-btn text-xs px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300 hover:border-slate-500";
+      });
+      const activeBtn = document.getElementById(`scen-${scenId}`);
+      if (activeBtn) {
+        activeBtn.className = "scen-btn text-xs px-2.5 py-1 rounded bg-cyan-600/30 border border-cyan-400 text-cyan-200 font-medium";
+      }
+
+      const res = await fetch("/api/scene");
+      const data = await res.json();
+      const preset = data.presets[scenId];
+      if (preset) {
+        document.getElementById("input-instruction").value = preset.instruction;
+        updateSceneGeometryFromSpec(preset.scene);
+      }
+      await runVerificationLoop();
+    }
+
+    function renderIterationsTrail(data) {
+      const container = document.getElementById("iterations-container");
+      container.innerHTML = data.iterations.map(iter => {
+        const passed = iter.verification.passed;
+        const badgeColor = passed
+          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+          : "bg-rose-500/20 text-rose-300 border-rose-500/40";
+        const cardBorder = passed ? "border-emerald-500/40" : "border-rose-500/40";
+
+        const violationsHtml = iter.verification.violations.length > 0
+          ? `<div class="mt-2 space-y-1.5">
+              ${iter.verification.violations.map(v => `
+                <div class="bg-rose-950/60 border border-rose-800/80 rounded p-2 text-xs text-rose-200 mono">
+                  <span class="font-bold text-rose-400">[${v.type}]</span> ${v.message}
+                </div>
+              `).join("")}
+            </div>`
+          : `<div class="mt-2 bg-emerald-950/50 border border-emerald-700/60 rounded p-2 text-xs text-emerald-200 mono">
+              ✓ All 6-DoF joint limits [-170°, +170°], Jacobian singularity checks, and 3D continuous segment-cylinder collision tests PASSED (Min clearance: +${iter.verification.min_clearance_m.toFixed(3)} m &ge; ${iter.verification.required_clearance_m} m).
+            </div>`;
+
+        return `
+          <div class="bg-slate-900/90 border ${cardBorder} rounded-lg p-3.5 space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-bold text-white">${iter.title}</span>
+              <span class="text-[11px] mono font-semibold px-2 py-0.5 rounded border ${badgeColor}">
+                ${passed ? "SANDBOX PASS" : `SANDBOX FAIL (${iter.verification.violations.length} Errors)`}
+              </span>
+            </div>
+            <div class="text-[11px] mono text-amber-300 bg-slate-950 px-2.5 py-1 rounded border border-slate-800">
+              $ ${iter.sandbox_command}
+            </div>
+            <div class="text-xs text-slate-300 whitespace-pre-line leading-relaxed">
+              ${iter.reasoning_summary}
+            </div>
+            ${violationsHtml}
+          </div>
+        `;
+      }).join("");
+    }
+
+    function togglePromptStudio() {
+      const drawer = document.getElementById("prompt-studio-drawer");
+      drawer.classList.toggle("hidden");
+    }
+
+    function applyQuickPrompt(promptText) {
+      document.getElementById("input-instruction").value = promptText;
+      const chkManual = document.getElementById("chk-manual-override");
+      if (chkManual) chkManual.checked = false;
+      runVerificationLoop();
+    }
+
+    function onSliderInput() {
+      const zVal = parseFloat(document.getElementById("slider-z").value);
+      const yVal = parseFloat(document.getElementById("slider-y").value);
+      const j5Val = parseFloat(document.getElementById("slider-j5").value);
+      const j6Val = parseFloat(document.getElementById("slider-j6").value);
+
+      document.getElementById("lbl-slider-z").textContent = `${zVal.toFixed(2)} m`;
+      document.getElementById("lbl-slider-y").textContent = `${yVal.toFixed(2)} m`;
+      document.getElementById("lbl-slider-j5").textContent = `${j5Val >= 0 ? "+" : ""}${j5Val.toFixed(0)}°`;
+      document.getElementById("lbl-slider-j6").textContent = `${j6Val >= 0 ? "+" : ""}${j6Val.toFixed(0)}°`;
+
+      const chkManual = document.getElementById("chk-manual-override");
+      if (chkManual) chkManual.checked = true;
+    }
+
+    function onManualOverrideToggle() {
+      // Optional immediate re-run if user toggles manual lock
+    }
+
+    function updateDirectiveStripUI(params) {
+      if (!params) return;
+      const z = Number(params.bypass_z_m ?? 0.48);
+      const y = Number(params.bypass_y_m ?? 0.12);
+      const j5 = Number(params.wrist_roll_j5_deg ?? 38.0);
+      const j6 = Number(params.tool_yaw_j6_deg ?? -32.0);
+
+      const dirModeEl = document.getElementById("dir-mode");
+      if (dirModeEl) {
+        dirModeEl.textContent = params.behavior_label || "🚀 Standard Arch Bypass";
+      }
+      document.getElementById("dir-z").textContent = `${z.toFixed(2)}m`;
+      document.getElementById("dir-y").textContent = `${y.toFixed(2)}m`;
+      document.getElementById("dir-j5").textContent = `${j5 >= 0 ? "+" : ""}${j5.toFixed(1)}°`;
+      document.getElementById("dir-j6").textContent = `${j6 >= 0 ? "+" : ""}${j6.toFixed(1)}°`;
+      document.getElementById("dir-note").textContent =
+        (params.applied_notes && params.applied_notes.length > 0)
+          ? params.applied_notes.join(" • ")
+          : "Standard Safe Bypass Profile";
+
+      // Sync sliders if manual lock is not checked
+      const chkManual = document.getElementById("chk-manual-override");
+      if (!chkManual || !chkManual.checked) {
+        document.getElementById("slider-z").value = z;
+        document.getElementById("slider-y").value = y;
+        document.getElementById("slider-j5").value = j5;
+        document.getElementById("slider-j6").value = j6;
+        document.getElementById("lbl-slider-z").textContent = `${z.toFixed(2)} m`;
+        document.getElementById("lbl-slider-y").textContent = `${y.toFixed(2)} m`;
+        document.getElementById("lbl-slider-j5").textContent = `${j5 >= 0 ? "+" : ""}${j5.toFixed(0)}°`;
+        document.getElementById("lbl-slider-j6").textContent = `${j6 >= 0 ? "+" : ""}${j6.toFixed(0)}°`;
+      }
+    }
+
+    async function runVerificationLoop() {
+      const btn = document.getElementById("btn-run-loop");
+      const btnText = document.getElementById("run-btn-text");
+      const instruction = document.getElementById("input-instruction").value;
+      const systemPromptEl = document.getElementById("input-system-prompt");
+      const chkManual = document.getElementById("chk-manual-override");
+      const chkAutoRepair = document.getElementById("chk-auto-repair");
+
+      let kinematicOverrides = null;
+      if (chkManual && chkManual.checked) {
+        kinematicOverrides = {
+          bypass_z_m: parseFloat(document.getElementById("slider-z").value),
+          bypass_y_m: parseFloat(document.getElementById("slider-y").value),
+          wrist_roll_j5_deg: parseFloat(document.getElementById("slider-j5").value),
+          tool_yaw_j6_deg: parseFloat(document.getElementById("slider-j6").value)
+        };
+      }
+
+      btn.disabled = true;
+      btnText.textContent = "Verifying in Antigravity Sandbox...";
+
+      try {
+        const response = await fetch("/api/plan-and-verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            instruction,
+            scenario_id: currentScenarioId,
+            system_prompt_override: systemPromptEl ? systemPromptEl.value : null,
+            kinematic_overrides: kinematicOverrides,
+            auto_self_repair: chkAutoRepair ? chkAutoRepair.checked : true
+          })
+        });
+        const data = await response.json();
+        lastPlanResult = data;
+
+        updateDirectiveStripUI(data.applied_prompt_params);
+
+        // Update Header & KPI Badges
+        document.getElementById("badge-model").textContent = data.model;
+        document.getElementById("loop-latency").textContent = `${data.total_duration_ms} ms`;
+        const statusEl = document.getElementById("kpi-status");
+        statusEl.textContent = `${data.status} (Iter ${data.metrics.total_iterations})`;
+        statusEl.className = data.status === "PASSED"
+          ? "text-lg font-bold text-emerald-400 mono mt-0.5"
+          : "text-lg font-bold text-rose-400 mono mt-0.5";
+
+        document.getElementById("kpi-clearance").textContent = `${data.metrics.min_obstacle_clearance_m >= 0 ? "+" : ""}${data.metrics.min_obstacle_clearance_m.toFixed(3)} m`;
+        document.getElementById("kpi-margin-sub").textContent = `Req ≥ ${data.metrics.required_clearance_m} m`;
+        document.getElementById("kpi-violations").textContent = `${data.metrics.initial_violations} → ${data.metrics.final_violations}`;
+
+        document.getElementById("hud-clearance").textContent = `${data.metrics.min_obstacle_clearance_m >= 0 ? "+" : ""}${data.metrics.min_obstacle_clearance_m.toFixed(3)} m`;
+        document.getElementById("hud-margin").textContent = `${data.metrics.required_clearance_m} m`;
+
+        updateSceneGeometryFromSpec(data.scene);
+        buildTrajectoryCurveLines(data.final_trajectory, data.failed_trajectory_preview);
+        renderIterationsTrail(data);
+
+        // Populate JSON output
+        const compactJson = {
+          status: data.status,
+          model: data.model,
+          thinking_level: data.thinking_level,
+          sandbox: data.sandbox_env,
+          applied_prompt_params: data.applied_prompt_params,
+          min_clearance_m: data.metrics.min_obstacle_clearance_m,
+          waypoints: data.final_trajectory.map(w => ({
+            name: w.name,
+            phase: w.phase,
+            gripper: w.gripper,
+            joints_deg: w.joints_deg,
+            ee_pos_m: w.ee_pos
+          }))
+        };
+        document.getElementById("json-output").textContent = JSON.stringify(compactJson, null, 2);
+
+        switchTrajectoryMode("repaired");
+      } catch (err) {
+        console.error("Verification loop error:", err);
+      } finally {
+        btn.disabled = false;
+        btnText.textContent = "Run Argon + Sandbox Self-Repair";
+      }
+    }
+
+    function copyTrajectoryJson() {
+      const txt = document.getElementById("json-output").textContent;
+      navigator.clipboard.writeText(txt);
+      const btn = document.getElementById("btn-copy-json");
+      btn.textContent = "Copied!";
+      setTimeout(() => { btn.textContent = "Copy JSON"; }, 1500);
+    }
+
+    window.addEventListener("DOMContentLoaded", () => {
+      initJointCards();
+      initThreeJS();
+      runVerificationLoop();
+    });
+  </script>
+</body>
+</html>
